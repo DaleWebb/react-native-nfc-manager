@@ -271,18 +271,24 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 			callback.invoke();
 
 			IntentFilter filter = new IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED);
-			getReactApplicationContext().getCurrentActivity().registerReceiver(mReceiver, filter);
+			Activity activity = getReactApplicationContext().getCurrentActivity();
+			if (activity != null) {
+				activity.registerReceiver(mReceiver, filter);
+			}
 		} else {
 			Log.d(LOG_TAG, "not support in this device");
 			callback.invoke("no nfc support");
 		}
 	}
     
-    	@ReactMethod
+ 	@ReactMethod
 	public void isSupported(Callback callback){
 		Log.d(LOG_TAG, "isSupported");
-		boolean result = getReactApplicationContext().getCurrentActivity().getPackageManager().hasSystemFeature(PackageManager.FEATURE_NFC);
-		callback.invoke(null,result);
+		Activity activity = getReactApplicationContext().getCurrentActivity();
+		if (activity != null) {
+			boolean result = activity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_NFC);
+			callback.invoke(null,result);
+		}
 	}
 
 	@ReactMethod
@@ -299,17 +305,21 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 	@ReactMethod
 	public void goToNfcSetting(Callback callback) {
 		Log.d(LOG_TAG, "goToNfcSetting");
-        Activity currentActivity = getCurrentActivity();
-		currentActivity.startActivity(new Intent(Settings.ACTION_NFC_SETTINGS));
-		callback.invoke();
+		Activity currentActivity = getCurrentActivity();
+		if (currentActivity != null) {
+			currentActivity.startActivity(new Intent(Settings.ACTION_NFC_SETTINGS));
+			callback.invoke();
+		}
 	}
 
 	@ReactMethod
 	public void getLaunchTagEvent(Callback callback) {
-        Activity currentActivity = getCurrentActivity();
-		Intent launchIntent = currentActivity.getIntent();
-		WritableMap nfcTag = parseNfcIntent(launchIntent);
-		callback.invoke(null, nfcTag);
+    Activity currentActivity = getCurrentActivity();
+		if (currentActivity != null) {
+			Intent launchIntent = currentActivity.getIntent();
+			WritableMap nfcTag = parseNfcIntent(launchIntent);
+			callback.invoke(null, nfcTag);
+		}
 	}
 
 	@ReactMethod
@@ -376,10 +386,10 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
         NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(context);
         Activity currentActivity = getCurrentActivity();
 
-        if (nfcAdapter != null && !currentActivity.isFinishing()) {
+        if (nfcAdapter != null && currentActivity != null && !currentActivity.isFinishing()) {
             try {
 				if (enable) {
-                    nfcAdapter.enableForegroundDispatch(currentActivity, getPendingIntent(), getIntentFilters(), getTechLists());
+                    nfcAdapter.enableForegroundDispatch(currentActivity, getPendingIntent(currentActivity), getIntentFilters(), getTechLists());
 				} else {
 					nfcAdapter.disableForegroundDispatch(currentActivity);
 				}
@@ -389,8 +399,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
         }
     }
 
-    private PendingIntent getPendingIntent() {
-        Activity activity = getCurrentActivity();
+    private PendingIntent getPendingIntent(Activity activity) {
         Intent intent = new Intent(activity, activity.getClass());
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(activity, 0, intent, 0);
