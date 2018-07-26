@@ -393,7 +393,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 				} else {
 					nfcAdapter.disableForegroundDispatch(currentActivity);
 				}
-            } catch (IllegalStateException e) {
+            } catch (IllegalStateException | NullPointerException e) {
                 Log.w(LOG_TAG, "Illegal State Exception starting NFC. Assuming application is terminating.");
             }
         }
