@@ -344,7 +344,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
         intentFilters.add(new IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED));
 
 		if (isResumed) {
-			enableDisableForegroundDispatch(true);
+			enableDisableForegroundDispatchForked(true);
 		}
         callback.invoke();
   	}
@@ -355,7 +355,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 		isForegroundEnabled = false;
 		intentFilters.clear();
 		if (isResumed) {
-			enableDisableForegroundDispatch(false);
+			enableDisableForegroundDispatchForked(false);
 		}
         callback.invoke();
   	}
@@ -365,7 +365,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
         Log.d(LOG_TAG, "onResume");
 		isResumed = true;
 		if (isForegroundEnabled) {
-			enableDisableForegroundDispatch(true);
+			enableDisableForegroundDispatchForked(true);
 		}
     }
 
@@ -373,7 +373,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
     public void onHostPause() {
         Log.d(LOG_TAG, "onPause");
 		isResumed = false;
-		enableDisableForegroundDispatch(false);
+		enableDisableForegroundDispatchForked(false);
     }
 
     @Override
@@ -381,18 +381,18 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
         Log.d(LOG_TAG, "onDestroy");
     }
 
-    private void enableDisableForegroundDispatch(boolean enable) {
+    private void enableDisableForegroundDispatchForked(boolean enable) {
         Log.i(LOG_TAG, "enableForegroundDispatch, enable = " + enable);
         NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(context);
         Activity currentActivity = getCurrentActivity();
 
         if (nfcAdapter != null && currentActivity != null && !currentActivity.isFinishing()) {
             try {
-				if (enable) {
+                if (enable) {
                     nfcAdapter.enableForegroundDispatch(currentActivity, getPendingIntent(currentActivity), getIntentFilters(), getTechLists());
-				} else {
-					nfcAdapter.disableForegroundDispatch(currentActivity);
-				}
+                } else {
+                    nfcAdapter.disableForegroundDispatch(currentActivity);
+                }
             } catch (IllegalStateException | NullPointerException e) {
                 Log.w(LOG_TAG, "Illegal State Exception starting NFC. Assuming application is terminating.");
             }
