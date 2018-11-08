@@ -803,7 +803,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
         if (nfcAdapter != null && currentActivity != null && !currentActivity.isFinishing()) {
             try {
 				if (enable) {
-                    nfcAdapter.enableForegroundDispatch(currentActivity, getPendingIntent(), getIntentFilters(), getTechLists());
+					nfcAdapter.enableForegroundDispatch(currentActivity, getPendingIntent(), getIntentFilters(), getTechLists());
 				} else {
 					nfcAdapter.disableForegroundDispatch(currentActivity);
 				}
@@ -813,7 +813,8 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
         }
     }
 
-    private PendingIntent getPendingIntent(Activity activity) {
+    private PendingIntent getPendingIntent() {
+        Activity activity = getCurrentActivity();
         Intent intent = new Intent(activity, activity.getClass());
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(activity, 0, intent, 0);
