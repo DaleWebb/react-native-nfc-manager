@@ -26,15 +26,23 @@ import android.nfc.NfcAdapter;
 import android.nfc.NfcEvent;
 import android.nfc.Tag;
 import android.nfc.TagLostException;
+import android.nfc.tech.TagTechnology;
 import android.nfc.tech.Ndef;
 import android.nfc.tech.NfcA;
+import android.nfc.tech.NfcB;
+import android.nfc.tech.NfcF;
+import android.nfc.tech.NfcV;
+import android.nfc.tech.IsoDep;
 import android.nfc.tech.NdefFormatable;
+import android.nfc.tech.MifareClassic;
+import android.nfc.tech.MifareUltralight;
 import android.os.Parcelable;
 
 import org.json.JSONObject;
 import org.json.JSONException;
 
 import java.util.*;
+import java.nio.charset.Charset;
 
 import static android.app.Activity.RESULT_OK;
 import static android.os.Build.VERSION_CODES.LOLLIPOP;
@@ -79,6 +87,19 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 	@Override
 	public String getName() {
 		return "NfcManager";
+	}
+
+	@Override
+	public Map<String, Object> getConstants() {
+		final Map<String, Object> constants = new HashMap<>();
+
+		constants.put("MIFARE_BLOCK_SIZE", MifareClassic.BLOCK_SIZE);
+		constants.put("MIFARE_ULTRALIGHT_PAGE_SIZE", MifareUltralight.PAGE_SIZE);
+		constants.put("MIFARE_ULTRALIGHT_TYPE", MifareUltralight.TYPE_ULTRALIGHT);
+		constants.put("MIFARE_ULTRALIGHT_TYPE_C", MifareUltralight.TYPE_ULTRALIGHT_C);
+		constants.put("MIFARE_ULTRALIGHT_TYPE_UNKNOWN", MifareUltralight.TYPE_UNKNOWN);
+
+		return constants;
 	}
 
 	private boolean hasPendingRequest() {
@@ -126,6 +147,25 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 		    } else {
 				// explicitly allow this
 				callback.invoke();
+			}
+		}
+	}
+
+	@ReactMethod
+	public void getTag(Callback callback) {
+		synchronized(this) {
+		    if (techRequest != null) {
+				try {
+				    TagTechnology tagTech = techRequest.getTechHandle();
+                    Tag tag = tagTech.getTag();
+				    WritableMap parsed = tag2React(tag);
+				    callback.invoke(null, parsed);
+				} catch (Exception ex) {
+					Log.d(LOG_TAG, "getTag fail");
+					callback.invoke("getTag fail");
+				}
+		    } else {
+				callback.invoke("no tech request available");
 			}
 		}
 	}
@@ -185,6 +225,306 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 		}
 	}
 
+	private void mifareClassicAuthenticate(char type, int sector, ReadableArray key, Callback callback) {
+		if (techRequest != null) {
+			try {
+				MifareClassic mifareTag = (MifareClassic) techRequest.getTechHandle();
+				if (mifareTag == null || mifareTag.getType() == MifareClassic.TYPE_UNKNOWN) {
+					// Not a mifare card, fail
+					callback.invoke("mifareClassicAuthenticate fail: TYPE_UNKNOWN");
+					return;
+				} else if (sector >= mifareTag.getSectorCount()) {
+					// Check if in range
+					String msg = String.format("mifareClassicAuthenticate fail: invalid sector %d (max %d)", sector, mifareTag.getSectorCount());
+					callback.invoke(msg);
+					return;
+				} else if (key.size() != 6) {
+					// Invalid key length
+					String msg = String.format("mifareClassicAuthenticate fail: invalid key (needs length 6 but has %d characters)", key.size());
+					callback.invoke(msg);
+					return;
+				}
+
+				boolean result = false;
+				if (type == 'A') {
+					result = mifareTag.authenticateSectorWithKeyA(sector, rnArrayToBytes(key));
+				} else {
+					result = mifareTag.authenticateSectorWithKeyB(sector, rnArrayToBytes(key));
+				}
+
+				if (!result) {
+					callback.invoke("mifareClassicAuthenticate fail: AUTH_FAIL");
+					return;
+				}
+
+				callback.invoke(null, true);
+			} catch (TagLostException ex) {
+				callback.invoke("mifareClassicAuthenticate fail: TAG_LOST");
+			} catch (Exception ex) {
+				callback.invoke("mifareClassicAuthenticate fail: " + ex.toString());
+			}
+		} else {
+			callback.invoke("no tech request available");
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicAuthenticateA(int sector, ReadableArray key, Callback callback) {
+		synchronized(this) {
+			mifareClassicAuthenticate('A', sector, key, callback);
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicAuthenticateB(int sector, ReadableArray key, Callback callback) {
+		synchronized(this) {
+			mifareClassicAuthenticate('B', sector, key, callback);
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicGetBlockCountInSector(int sectorIndex, Callback callback) {
+		synchronized(this) {
+			if (techRequest != null) {
+				try {
+					MifareClassic mifareTag = (MifareClassic) techRequest.getTechHandle();
+					if (mifareTag == null || mifareTag.getType() == MifareClassic.TYPE_UNKNOWN) {
+						// Not a mifare card, fail
+						callback.invoke("mifareClassicGetBlockCountInSector fail: TYPE_UNKNOWN");
+						return;
+					} else if (sectorIndex >= mifareTag.getSectorCount()) {
+						// Check if in range
+						String msg = String.format("mifareClassicGetBlockCountInSector fail: invalid sector %d (max %d)", sectorIndex, mifareTag.getSectorCount());
+						callback.invoke(msg);
+						return;
+					}
+
+					callback.invoke(null, mifareTag.getBlockCountInSector(sectorIndex));
+				} catch (Exception ex) {
+					callback.invoke("mifareClassicGetBlockCountInSector fail: " + ex.toString());
+				}
+			} else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicGetSectorCount(Callback callback) {
+		synchronized(this) {
+			if (techRequest != null) {
+				try {
+					MifareClassic mifareTag = (MifareClassic) techRequest.getTechHandle();
+					if (mifareTag == null || mifareTag.getType() == MifareClassic.TYPE_UNKNOWN) {
+						// Not a mifare card, fail
+						callback.invoke("mifareClassicGetSectorCount fail: TYPE_UNKNOWN");
+						return;
+					}
+
+					callback.invoke(null, mifareTag.getSectorCount());
+				} catch (Exception ex) {
+					callback.invoke("mifareClassicGetSectorCount fail: " + ex.toString());
+				}
+			} else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicSectorToBlock(int sectorIndex, Callback callback) {
+		synchronized(this) {
+			if (techRequest != null) {
+				try {
+					MifareClassic mifareTag = (MifareClassic) techRequest.getTechHandle();
+					if (mifareTag == null || mifareTag.getType() == MifareClassic.TYPE_UNKNOWN) {
+						// Not a mifare card, fail
+						callback.invoke("mifareClassicSectorToBlock fail: TYPE_UNKNOWN");
+						return;
+					} else if (sectorIndex >= mifareTag.getSectorCount()) {
+						// Check if in range
+						String msg = String.format("mifareClassicSectorToBlock fail: invalid sector %d (max %d)", sectorIndex, mifareTag.getSectorCount());
+						callback.invoke(msg);
+						return;
+					}
+
+					callback.invoke(null, mifareTag.sectorToBlock(sectorIndex));
+				} catch (Exception ex) {
+					callback.invoke("mifareClassicSectorToBlock fail: " + ex.toString());
+				}
+			} else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicReadBlock(int blockIndex, Callback callback) {
+		synchronized(this) {
+			if (techRequest != null) {
+				try {
+					MifareClassic mifareTag = (MifareClassic) techRequest.getTechHandle();
+					if (mifareTag == null || mifareTag.getType() == MifareClassic.TYPE_UNKNOWN) {
+						// Not a mifare card, fail
+						callback.invoke("mifareClassicReadBlock fail: TYPE_UNKNOWN");
+						return;
+					} else if (blockIndex >= mifareTag.getBlockCount()) {
+						// Check if in range
+						String msg = String.format("mifareClassicReadBlock fail: invalid block %d (max %d)", blockIndex, mifareTag.getBlockCount());
+						callback.invoke(msg);
+						return;
+					}
+
+					byte[] buffer = new byte[MifareClassic.BLOCK_SIZE];
+					buffer = mifareTag.readBlock(blockIndex);
+
+					WritableArray result = bytesToRnArray(buffer);
+					callback.invoke(null, result);
+				} catch (TagLostException ex) {
+					callback.invoke("mifareClassicReadBlock fail: TAG_LOST");
+				} catch (Exception ex) {
+					callback.invoke("mifareClassicReadBlock fail: " + ex.toString());
+				}
+			} else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicReadSector(int sectorIndex, Callback callback) {
+		synchronized(this) {
+			if (techRequest != null) {
+				try {
+					MifareClassic mifareTag = (MifareClassic) techRequest.getTechHandle();
+					if (mifareTag == null || mifareTag.getType() == MifareClassic.TYPE_UNKNOWN) {
+						// Not a mifare card, fail
+						callback.invoke("mifareClassicReadSector fail: TYPE_UNKNOWN");
+						return;
+					} else if (sectorIndex >= mifareTag.getSectorCount()) {
+						// Check if in range
+						String msg = String.format("mifareClassicReadSector fail: invalid sector %d (max %d)", sectorIndex, mifareTag.getSectorCount());
+						callback.invoke(msg);
+						return;
+					}
+
+					WritableArray result = Arguments.createArray();
+					int blocks = mifareTag.getBlockCountInSector(sectorIndex);
+					byte[] buffer = new byte[MifareClassic.BLOCK_SIZE];
+					for (int i = 0; i < blocks; i++) {
+						buffer = mifareTag.readBlock(mifareTag.sectorToBlock(sectorIndex)+i);
+						appendBytesToRnArray(result, buffer);
+					}
+
+					callback.invoke(null, result);
+				} catch (TagLostException ex) {
+					callback.invoke("mifareClassicReadSector fail: TAG_LOST");
+				} catch (Exception ex) {
+					callback.invoke("mifareClassicReadSector fail: " + ex.toString());
+				}
+			} else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void mifareClassicWriteBlock(int blockIndex, ReadableArray block, Callback callback) {
+		synchronized(this) {
+			if (techRequest != null) {
+				try {
+					MifareClassic mifareTag = (MifareClassic) techRequest.getTechHandle();
+					if (mifareTag == null || mifareTag.getType() == MifareClassic.TYPE_UNKNOWN) {
+						// Not a mifare card, fail
+						callback.invoke("mifareClassicWriteBlock fail: TYPE_UNKNOWN");
+						return;
+					} else if (blockIndex >= mifareTag.getBlockCount()) {
+						// Check if in range
+						String msg = String.format("mifareClassicWriteBlock fail: invalid block %d (max %d)", blockIndex, mifareTag.getBlockCount());
+						callback.invoke(msg);
+						return;
+					} else if (block.size() != MifareClassic.BLOCK_SIZE) {
+						// Wrong block count
+						String msg = String.format("mifareClassicWriteBlock fail: invalid block size %d (should be %d)", block.size(), MifareClassic.BLOCK_SIZE);
+						callback.invoke(msg);
+						return;
+					}
+
+					byte[] buffer = rnArrayToBytes(block);
+					mifareTag.writeBlock(blockIndex, buffer);
+
+					callback.invoke(null, true);
+				} catch (TagLostException ex) {
+					callback.invoke("mifareClassicWriteBlock fail: TAG_LOST");
+				} catch (Exception ex) {
+					callback.invoke("mifareClassicWriteBlock fail: " + ex.toString());
+				}
+			} else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void mifareUltralightReadPages(int pageOffset, Callback callback) {
+		synchronized(this) {
+		    if (techRequest != null) {
+				try {
+				    MifareUltralight techHandle = (MifareUltralight)techRequest.getTechHandle();
+				    byte[] resultBytes = techHandle.readPages(pageOffset);
+					WritableArray resultRnArray = bytesToRnArray(resultBytes);
+			    	callback.invoke(null, resultRnArray);
+					return;
+				} catch (TagLostException ex) {
+					callback.invoke("mifareUltralight fail: TAG_LOST");
+				} catch (Exception ex) {
+					callback.invoke("mifareUltralight fail: " + ex.toString());
+				}
+		    } else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void mifareUltralightWritePage(int pageOffset, ReadableArray rnArray, Callback callback) {
+		synchronized(this) {
+		    if (techRequest != null) {
+				try {
+					byte[] bytes = rnArrayToBytes(rnArray);
+				    MifareUltralight techHandle = (MifareUltralight)techRequest.getTechHandle();
+				    techHandle.writePage(pageOffset, bytes);
+			    	callback.invoke();
+					return;
+				} catch (TagLostException ex) {
+					callback.invoke("mifareUltralight fail: TAG_LOST");
+				} catch (Exception ex) {
+					callback.invoke("mifareUltralight fail: " + ex.toString());
+				}
+		    } else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
+	@ReactMethod
+	public void makeReadOnly(Callback callback) {
+		synchronized(this) {
+		    if (techRequest != null) {
+				try {
+				    Ndef ndef = (Ndef)techRequest.getTechHandle();
+					boolean result = ndef.makeReadOnly();
+				    callback.invoke(null, result);
+				} catch (Exception ex) {
+					Log.d(LOG_TAG, "makeReadOnly fail");
+					callback.invoke("makeReadOnly fail");
+				}
+		    } else {
+				callback.invoke("no tech request available");
+			}
+		}
+	}
+
 	@ReactMethod
 	public void transceive(ReadableArray rnArray, Callback callback) {
 		synchronized(this) {
@@ -192,8 +532,42 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 				try {
 					String tech = techRequest.getTechType();
 				    byte[] bytes = rnArrayToBytes(rnArray);
+
+					TagTechnology baseTechHandle = techRequest.getTechHandle();
+					// TagTechnology is the base class for each tech (ex, NfcA, NfcB, IsoDep ...)
+					// but it doesn't provide transceive in its interface, so we need to explicitly cast it 
 					if (tech.equals("NfcA")) {
-						NfcA techHandle = (NfcA)techRequest.getTechHandle();
+						NfcA techHandle = (NfcA)baseTechHandle;
+				    	byte[] resultBytes = techHandle.transceive(bytes);
+						WritableArray resultRnArray = bytesToRnArray(resultBytes);
+				    	callback.invoke(null, resultRnArray);
+						return;
+					} else if (tech.equals("NfcB")) {
+						NfcB techHandle = (NfcB)baseTechHandle;
+				    	byte[] resultBytes = techHandle.transceive(bytes);
+						WritableArray resultRnArray = bytesToRnArray(resultBytes);
+				    	callback.invoke(null, resultRnArray);
+						return;
+					} else if (tech.equals("NfcF")) {
+						NfcF techHandle = (NfcF)baseTechHandle;
+				    	byte[] resultBytes = techHandle.transceive(bytes);
+						WritableArray resultRnArray = bytesToRnArray(resultBytes);
+				    	callback.invoke(null, resultRnArray);
+						return;
+					} else if (tech.equals("NfcV")) {
+						NfcV techHandle = (NfcV)baseTechHandle;
+				    	byte[] resultBytes = techHandle.transceive(bytes);
+						WritableArray resultRnArray = bytesToRnArray(resultBytes);
+				    	callback.invoke(null, resultRnArray);
+						return;
+					} else if (tech.equals("IsoDep")) {
+						IsoDep techHandle = (IsoDep)baseTechHandle;
+				    	byte[] resultBytes = techHandle.transceive(bytes);
+						WritableArray resultRnArray = bytesToRnArray(resultBytes);
+				    	callback.invoke(null, resultRnArray);
+						return;
+					} else if (tech.equals("MifareUltralight")) {
+						MifareUltralight techHandle = (MifareUltralight)baseTechHandle;
 				    	byte[] resultBytes = techHandle.transceive(bytes);
 						WritableArray resultRnArray = bytesToRnArray(resultBytes);
 				    	callback.invoke(null, resultRnArray);
@@ -264,31 +638,65 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 	}
 
 	@ReactMethod
+	public void setNdefPushMessage(ReadableArray rnArray, Callback callback) {
+		synchronized(this) {
+		    if (techRequest == null && writeNdefRequest == null) {
+				try {
+        			Activity currentActivity = getCurrentActivity();
+					if (currentActivity == null) {
+						throw new RuntimeException("cannot get current activity");
+					}
+
+					NdefMessage msgToPush = null;
+					if (rnArray != null) {
+						msgToPush = new NdefMessage(rnArrayToBytes(rnArray));
+					}	
+
+					NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(context);
+					nfcAdapter.setNdefPushMessage(msgToPush, currentActivity);
+				    callback.invoke();
+				} catch (Exception ex) {
+					Log.d(LOG_TAG, "sendNdefPushMessage fail, " + ex.getMessage());
+					callback.invoke("sendNdefPushMessage fail");
+				}
+		    } else {
+				callback.invoke("please first cancel existing tech or write request");
+			}
+		}
+	}
+
+	@ReactMethod
 	public void start(Callback callback) {
 		NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(context);
 		if (nfcAdapter != null) {
 			Log.d(LOG_TAG, "start");
-			callback.invoke();
 
 			IntentFilter filter = new IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED);
-			Activity activity = getReactApplicationContext().getCurrentActivity();
-			if (activity != null) {
-				activity.registerReceiver(mReceiver, filter);
-			}
+			Activity currentActivity = getCurrentActivity();
+		    if (currentActivity == null) {
+		    	callback.invoke("fail to get current activity");
+		    	return;
+		    }
+
+			currentActivity.registerReceiver(mReceiver, filter);
+			callback.invoke();
 		} else {
 			Log.d(LOG_TAG, "not support in this device");
 			callback.invoke("no nfc support");
 		}
 	}
     
- 	@ReactMethod
+   	@ReactMethod
 	public void isSupported(Callback callback){
 		Log.d(LOG_TAG, "isSupported");
-		Activity activity = getReactApplicationContext().getCurrentActivity();
-		if (activity != null) {
-			boolean result = activity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_NFC);
-			callback.invoke(null,result);
+        Activity currentActivity = getCurrentActivity();
+		if (currentActivity == null) {
+			callback.invoke("fail to get current activity");
+			return;
 		}
+
+		boolean result = currentActivity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_NFC);
+		callback.invoke(null, result);
 	}
 
 	@ReactMethod
@@ -305,21 +713,27 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 	@ReactMethod
 	public void goToNfcSetting(Callback callback) {
 		Log.d(LOG_TAG, "goToNfcSetting");
-		Activity currentActivity = getCurrentActivity();
-		if (currentActivity != null) {
-			currentActivity.startActivity(new Intent(Settings.ACTION_NFC_SETTINGS));
-			callback.invoke();
+        Activity currentActivity = getCurrentActivity();
+		if (currentActivity == null) {
+			callback.invoke("fail to get current activity");
+			return;
 		}
+
+		currentActivity.startActivity(new Intent(Settings.ACTION_NFC_SETTINGS));
+		callback.invoke();
 	}
 
 	@ReactMethod
 	public void getLaunchTagEvent(Callback callback) {
-    Activity currentActivity = getCurrentActivity();
-		if (currentActivity != null) {
-			Intent launchIntent = currentActivity.getIntent();
-			WritableMap nfcTag = parseNfcIntent(launchIntent);
-			callback.invoke(null, nfcTag);
+        Activity currentActivity = getCurrentActivity();
+		if (currentActivity == null) {
+			callback.invoke("fail to get current activity");
+			return;
 		}
+
+		Intent launchIntent = currentActivity.getIntent();
+		WritableMap nfcTag = parseNfcIntent(launchIntent);
+		callback.invoke(null, nfcTag);
 	}
 
 	@ReactMethod
@@ -388,11 +802,11 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 
         if (nfcAdapter != null && currentActivity != null && !currentActivity.isFinishing()) {
             try {
-                if (enable) {
-                    nfcAdapter.enableForegroundDispatch(currentActivity, getPendingIntent(currentActivity), getIntentFilters(), getTechLists());
-                } else {
-                    nfcAdapter.disableForegroundDispatch(currentActivity);
-                }
+				if (enable) {
+                    nfcAdapter.enableForegroundDispatch(currentActivity, getPendingIntent(), getIntentFilters(), getTechLists());
+				} else {
+					nfcAdapter.disableForegroundDispatch(currentActivity);
+				}
             } catch (IllegalStateException | NullPointerException e) {
                 Log.w(LOG_TAG, "Illegal State Exception starting NFC. Assuming application is terminating.");
             }
@@ -632,7 +1046,7 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 		}
 	}
 
-	private byte[] rnArrayToBytes(ReadableArray rArray) {
+	private static byte[] rnArrayToBytes(ReadableArray rArray) {
 		byte[] bytes = new byte[rArray.size()];
 		for (int i = 0; i < rArray.size(); i++) {
 			bytes[i] = (byte)(rArray.getInt(i) & 0xff);
@@ -640,12 +1054,15 @@ class NfcManager extends ReactContextBaseJavaModule implements ActivityEventList
 		return bytes;
 	}
 
-	public WritableArray bytesToRnArray(byte[] bytes) {
-        WritableArray value = Arguments.createArray();
-        for (int i = 0; i < bytes.length; i++) {
-            value.pushInt((bytes[i] & 0xFF));
+	private static WritableArray bytesToRnArray(byte[] bytes) {
+		return appendBytesToRnArray(Arguments.createArray(), bytes);
+	}
+
+	private static WritableArray appendBytesToRnArray(WritableArray value, byte[] bytes) {
+		for (int i = 0; i < bytes.length; i++) {
+			value.pushInt((bytes[i] & 0xFF));
 		}
-        return value;
-    }
+		return value;
+	}
 }
 
